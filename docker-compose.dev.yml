@@ -1,0 +1,31 @@
+name: ai-album-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: ai-album-dev-postgres
+    environment:
+      POSTGRES_DB: aialbum
+      POSTGRES_USER: aialbum
+      POSTGRES_PASSWORD: aialbum
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=384MB
+      -c work_mem=8MB
+      -c random_page_cost=1.1
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    container_name: ai-album-dev-valkey
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  pgdata-dev:

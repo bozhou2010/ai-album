@@ -1,0 +1,100 @@
+name: ai-album
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: ai-album-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aialbum}
+      POSTGRES_USER: ${POSTGRES_USER:-aialbum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aialbum}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=16MB
+      -c random_page_cost=1.1
+      -c max_connections=100
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aialbum}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    container_name: ai-album-valkey
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-album-server
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aialbum}:${POSTGRES_PASSWORD:-aialbum}@postgres:5432/${POSTGRES_DB:-aialbum}
+      REDIS_URL: redis://valkey:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      UPLOAD_DIR: /app/uploads
+      THUMBNAIL_DIR: /app/thumbnails
+      MAX_FILE_SIZE: 200mb
+      ML_SERVICE_URL: http://ml:3001
+      STORAGE_TYPE: local
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@aialbum.com}
+      TRASH_RETENTION_DAYS: ${TRASH_RETENTION_DAYS:-30}
+    volumes:
+      - uploads:/app/uploads
+      - thumbnails:/app/thumbnails
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ml:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: ai-album-ml
+    environment:
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-chi_sim+eng}
+      CLIP_MODEL: ${CLIP_MODEL:-XLM-Roberta-Large-Vit-B-16Plus}
+      FACE_MODEL: ${FACE_MODEL:-buffalo_l}
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: ai-album-nginx
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - server
+      - ml
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
+  thumbnails:
